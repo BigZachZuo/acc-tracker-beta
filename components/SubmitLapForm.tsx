@@ -71,10 +71,12 @@ const SubmitLapForm: React.FC<SubmitLapFormProps> = ({ track: initialTrack, user
         Analyze this Assetto Corsa Competizione screenshot.
         
         Tasks:
-        1. Identify the Lap Time (MM:SS.ms).
-        2. Identify the Car Model and match to the provided Car List.
-        3. Identify the Track Name from the UI/Environment and match to the provided Track List.
-        4. Identify Track Temperature (e.g., "Track: 24°C").
+        1. **Fastest Lap**: Identify the FASTEST (lowest) valid lap time (MM:SS.ms) visible in the image. 
+           - If a leaderboard is shown, select the row with the best time.
+           - Ignore invalid laps (often red) if a valid one exists.
+        2. **Car**: Identify the Car Model specifically used for that fastest lap. Match it to the provided Car List.
+        3. **Track**: Identify the Track Name from the UI/Environment and match to the provided Track List.
+        4. **Conditions**: Identify Track Temperature (e.g., "Track: 24°C").
 
         Lists:
         [CARS]
@@ -85,7 +87,7 @@ const SubmitLapForm: React.FC<SubmitLapFormProps> = ({ track: initialTrack, user
       `;
 
       const response = await ai.models.generateContent({
-        model: 'gemini-3-flash-preview',
+        model: 'gemini-2.0-flash',
         contents: {
           parts: [
             { inlineData: { mimeType: mimeType, data: base64Data } },
@@ -143,7 +145,7 @@ const SubmitLapForm: React.FC<SubmitLapFormProps> = ({ track: initialTrack, user
       const errorStr = err.message || JSON.stringify(err);
 
       if (errorStr.includes("429") || errorStr.includes("RESOURCE_EXHAUSTED") || errorStr.includes("quota")) {
-        friendlyError = "AI 服务配额已耗尽 (429)。请稍后再试或直接手动录入数据。";
+        friendlyError = "AI 服务配额已耗尽 (429)。请等待几秒后点击重试。";
       } else if (errorStr.includes("503") || errorStr.includes("overloaded")) {
         friendlyError = "AI 服务繁忙，请稍后再试。";
       }
@@ -294,12 +296,43 @@ const SubmitLapForm: React.FC<SubmitLapFormProps> = ({ track: initialTrack, user
               className="w-full h-32 object-cover rounded-lg opacity-80" 
             />
             {isAnalyzing && (
-              <div className="absolute inset-0 flex flex-col items-center justify-center bg-slate-900/60 backdrop-blur-sm rounded-lg">
+              <div className="absolute inset-0 flex flex-col items-center justify-center bg-slate-900/60 backdrop-blur-sm rounded-lg z-10">
                  <span className="w-8 h-8 border-4 border-red-500 border-t-transparent rounded-full animate-spin mb-2"></span>
                  <span className="text-white font-bold text-sm shadow-black drop-shadow-md">正在识别赛道与圈速...</span>
               </div>
             )}
-            {!isAnalyzing && (
+            
+            {!isAnalyzing && error && (
+               <div className="absolute inset-0 flex flex-col items-center justify-center bg-slate-900/80 backdrop-blur-sm rounded-lg z-10 p-4 text-center">
+                  <div className="text-red-400 text-sm font-bold mb-3">{error}</div>
+                  <div className="flex gap-2">
+                    <Button 
+                      type="button" 
+                      variant="primary" 
+                      className="!py-1 !px-3 !text-xs"
+                      onClick={(e) => {
+                         e.stopPropagation();
+                         analyzeScreenshot(previewImage);
+                      }}
+                    >
+                      重试
+                    </Button>
+                    <Button 
+                      type="button" 
+                      variant="secondary" 
+                      className="!py-1 !px-3 !text-xs"
+                      onClick={() => {
+                        setPreviewImage(null);
+                        setError('');
+                      }}
+                    >
+                      取消
+                    </Button>
+                  </div>
+               </div>
+            )}
+
+            {!isAnalyzing && !error && (
               <button 
                 type="button"
                 onClick={() => {
@@ -313,7 +346,7 @@ const SubmitLapForm: React.FC<SubmitLapFormProps> = ({ track: initialTrack, user
                   }
                   setIsVerified(false); // Reset verified if image removed
                 }}
-                className="absolute top-2 right-2 bg-black/50 text-white rounded-full p-1 hover:bg-red-600 transition-colors"
+                className="absolute top-2 right-2 bg-black/50 text-white rounded-full p-1 hover:bg-red-600 transition-colors z-20"
                 title="清除并重新上传"
               >
                 <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
@@ -327,7 +360,7 @@ const SubmitLapForm: React.FC<SubmitLapFormProps> = ({ track: initialTrack, user
 
       <form onSubmit={handleSubmit} className="space-y-6">
         
-        {/* Track Display (Read Only if from AI, but editable if manual/edit mode, let's keep it locked for simplicity unless editing) */}
+        {/* Track Display */}
         <div>
            <div className="flex items-center gap-2 mb-2">
              <label className="block text-slate-400 text-sm font-bold">赛道</label>
@@ -479,7 +512,7 @@ const SubmitLapForm: React.FC<SubmitLapFormProps> = ({ track: initialTrack, user
           </div>
         </div>
 
-        {error && (
+        {error && !previewImage && (
           <div className="bg-yellow-900/50 border border-yellow-500/50 text-yellow-200 px-4 py-3 rounded text-sm font-semibold break-words">
             ⚠️ {error}
           </div>
