@@ -28,6 +28,7 @@ const SubmitLapForm: React.FC<SubmitLapFormProps> = ({ track: initialTrack, user
   const [isVerified, setIsVerified] = useState<boolean>(initialData?.isVerified || false);
   
   const [error, setError] = useState('');
+  const [rawError, setRawError] = useState(''); // To show the exact error message
   const [successMessage, setSuccessMessage] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   
@@ -47,7 +48,10 @@ const SubmitLapForm: React.FC<SubmitLapFormProps> = ({ track: initialTrack, user
     reader.onloadend = () => {
       const base64String = reader.result as string;
       setPreviewImage(base64String);
-      analyzeScreenshot(base64String); // Auto-start analysis
+      // Removed automatic call to analyzeScreenshot to save quota
+      setIsVerified(false);
+      setError('');
+      setRawError('');
     };
     reader.readAsDataURL(file);
   };
@@ -55,6 +59,7 @@ const SubmitLapForm: React.FC<SubmitLapFormProps> = ({ track: initialTrack, user
   const analyzeScreenshot = async (base64Full: string) => {
     setIsAnalyzing(true);
     setError('');
+    setRawError('');
 
     try {
       // Clean base64 string (remove data:image/png;base64, prefix)
@@ -87,7 +92,7 @@ const SubmitLapForm: React.FC<SubmitLapFormProps> = ({ track: initialTrack, user
       `;
 
       const response = await ai.models.generateContent({
-        model: 'gemini-2.0-flash',
+        model: 'gemini-3-flash-preview',
         contents: {
           parts: [
             { inlineData: { mimeType: mimeType, data: base64Data } },
@@ -141,17 +146,21 @@ const SubmitLapForm: React.FC<SubmitLapFormProps> = ({ track: initialTrack, user
     } catch (err: any) {
       console.error("AI Analysis Failed:", err);
       
-      let friendlyError = "AI 识别失败，请确保截图清晰包含数据。";
       const errorStr = err.message || JSON.stringify(err);
+      setRawError(errorStr); // Save raw error for display
+
+      let friendlyError = "AI 识别失败";
 
       if (errorStr.includes("429") || errorStr.includes("RESOURCE_EXHAUSTED") || errorStr.includes("quota")) {
-        friendlyError = "AI 服务配额已耗尽 (429)。请等待几秒后点击重试。";
+        friendlyError = "配额耗尽 (429)。请检查 API Key 配额或稍后再试。";
       } else if (errorStr.includes("503") || errorStr.includes("overloaded")) {
-        friendlyError = "AI 服务繁忙，请稍后再试。";
+        friendlyError = "AI 服务繁忙 (503)，请稍后再试。";
+      } else if (errorStr.includes("API Key") || errorStr.includes("400")) {
+         friendlyError = "API Key 无效或未配置 (400)。";
       }
 
       setError(friendlyError);
-      setIsVerified(false); // Analysis failed, so not verified
+      setIsVerified(false); 
     } finally {
       setIsAnalyzing(false);
     }
@@ -166,6 +175,7 @@ const SubmitLapForm: React.FC<SubmitLapFormProps> = ({ track: initialTrack, user
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
+    setRawError('');
     setSuccessMessage('');
     setIsSubmitting(true);
 
@@ -259,7 +269,7 @@ const SubmitLapForm: React.FC<SubmitLapFormProps> = ({ track: initialTrack, user
         </div>
       </div>
 
-      {/* AI Upload Section - Available for both New and Edit */}
+      {/* AI Upload Section */}
       <div className="mb-6 p-4 bg-slate-900/50 rounded-lg border border-slate-700 border-dashed hover:border-red-500/50 transition-colors">
         <input 
           type="file" 
@@ -285,7 +295,7 @@ const SubmitLapForm: React.FC<SubmitLapFormProps> = ({ track: initialTrack, user
               {isEditing ? '上传新截图以更新数据' : '点击上传游戏截图'}
             </span>
             <span className="text-xs text-slate-500">
-               {isEditing ? '这将覆盖当前数据并标记为已验证' : '必须上传截图以自动填充数据'}
+               {isEditing ? '这将覆盖当前数据' : '上传截图后手动点击识别'}
             </span>
           </button>
         ) : (
@@ -295,16 +305,39 @@ const SubmitLapForm: React.FC<SubmitLapFormProps> = ({ track: initialTrack, user
               alt="Preview" 
               className="w-full h-32 object-cover rounded-lg opacity-80" 
             />
+
+            {/* Loading State */}
             {isAnalyzing && (
-              <div className="absolute inset-0 flex flex-col items-center justify-center bg-slate-900/60 backdrop-blur-sm rounded-lg z-10">
+              <div className="absolute inset-0 flex flex-col items-center justify-center bg-slate-900/80 backdrop-blur-sm rounded-lg z-10">
                  <span className="w-8 h-8 border-4 border-red-500 border-t-transparent rounded-full animate-spin mb-2"></span>
                  <span className="text-white font-bold text-sm shadow-black drop-shadow-md">正在识别赛道与圈速...</span>
               </div>
             )}
             
+            {/* Manual Trigger Button */}
+            {!isAnalyzing && !isVerified && !error && (
+               <div className="absolute inset-0 flex items-center justify-center bg-black/40 hover:bg-black/50 transition-colors rounded-lg z-10">
+                   <Button 
+                      onClick={() => analyzeScreenshot(previewImage)}
+                      variant="primary"
+                      className="shadow-xl scale-110 !px-6 !py-2"
+                   >
+                      🤖 开始 AI 识别
+                   </Button>
+               </div>
+            )}
+
+            {/* Error State with Retry */}
             {!isAnalyzing && error && (
-               <div className="absolute inset-0 flex flex-col items-center justify-center bg-slate-900/80 backdrop-blur-sm rounded-lg z-10 p-4 text-center">
-                  <div className="text-red-400 text-sm font-bold mb-3">{error}</div>
+               <div className="absolute inset-0 flex flex-col items-center justify-center bg-slate-900/90 backdrop-blur-sm rounded-lg z-10 p-4 text-center">
+                  <div className="text-red-400 text-sm font-bold mb-1">{error}</div>
+                  {/* Detailed Error for Debugging */}
+                  {rawError && (
+                     <div className="text-[10px] text-slate-400 mb-3 max-w-xs break-all bg-black/30 p-1 rounded font-mono">
+                        {rawError.slice(0, 150)}{rawError.length > 150 ? '...' : ''}
+                     </div>
+                  )}
+
                   <div className="flex gap-2">
                     <Button 
                       type="button" 
@@ -324,19 +357,23 @@ const SubmitLapForm: React.FC<SubmitLapFormProps> = ({ track: initialTrack, user
                       onClick={() => {
                         setPreviewImage(null);
                         setError('');
+                        setRawError('');
                       }}
                     >
-                      取消
+                      重新上传
                     </Button>
                   </div>
                </div>
             )}
 
-            {!isAnalyzing && !error && (
+            {/* Delete/Clear Button */}
+            {!isAnalyzing && (
               <button 
                 type="button"
                 onClick={() => {
                   setPreviewImage(null);
+                  setError('');
+                  setRawError('');
                   if (!isEditing) {
                       setMinutes('');
                       setSeconds('');
@@ -344,10 +381,10 @@ const SubmitLapForm: React.FC<SubmitLapFormProps> = ({ track: initialTrack, user
                       setTrackTemp('');
                       setTargetTrackId(initialTrack.id);
                   }
-                  setIsVerified(false); // Reset verified if image removed
+                  setIsVerified(false);
                 }}
                 className="absolute top-2 right-2 bg-black/50 text-white rounded-full p-1 hover:bg-red-600 transition-colors z-20"
-                title="清除并重新上传"
+                title="清除图片"
               >
                 <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
                   <path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" />
