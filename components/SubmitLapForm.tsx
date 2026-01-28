@@ -1,4 +1,3 @@
-
 import React, { useState, useRef } from 'react';
 import { Track, User, LapTime, InputDevice } from '../types';
 import { CARS, TRACKS } from '../constants';
@@ -63,6 +62,10 @@ const SubmitLapForm: React.FC<SubmitLapFormProps> = ({ track: initialTrack, user
     setRawError('');
 
     try {
+      if (!process.env.API_KEY) {
+        throw new Error("Missing API Key. Please set VITE_API_KEY in Zeabur variables.");
+      }
+
       // Clean base64 string (remove data:image/png;base64, prefix)
       const base64Data = base64Full.split(',')[1];
       const mimeType = base64Full.split(';')[0].split(':')[1];
@@ -93,7 +96,7 @@ const SubmitLapForm: React.FC<SubmitLapFormProps> = ({ track: initialTrack, user
       `;
 
       const response = await ai.models.generateContent({
-        model: 'gemini-2.0-flash',
+        model: 'gemini-3-flash-preview',
         contents: {
           parts: [
             { inlineData: { mimeType: mimeType, data: base64Data } },
@@ -156,8 +159,8 @@ const SubmitLapForm: React.FC<SubmitLapFormProps> = ({ track: initialTrack, user
         friendlyError = "配额耗尽 (429)。请检查 API Key 配额或稍后再试。";
       } else if (errorStr.includes("503") || errorStr.includes("overloaded")) {
         friendlyError = "AI 服务繁忙 (503)，请稍后再试。";
-      } else if (errorStr.includes("API Key") || errorStr.includes("400") || errorStr.includes("must be set")) {
-         friendlyError = "API Key 配置错误。请检查环境变量。";
+      } else if (errorStr.includes("API Key") || errorStr.includes("400") || errorStr.includes("must be set") || errorStr.includes("Missing API Key")) {
+         friendlyError = "API Key 配置错误。请检查 Zeabur 环境变量 VITE_API_KEY。";
       }
 
       setError(friendlyError);
