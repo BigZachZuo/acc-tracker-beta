@@ -139,9 +139,9 @@ const SubmitLapForm: React.FC<SubmitLapFormProps> = ({ track: initialTrack, user
         ${trackListContext}
       `;
 
-      // Use gemini-2.0-flash-exp for better quota handling on free tier than gemini-3-preview
+      // Use gemini-3-flash-preview for reliable multimodal analysis
       const response = await ai.models.generateContent({
-        model: 'gemini-2.0-flash-exp',
+        model: 'gemini-3-flash-preview',
         contents: {
           parts: [
             { inlineData: { mimeType: mimeType, data: base64Data } },
@@ -206,6 +206,8 @@ const SubmitLapForm: React.FC<SubmitLapFormProps> = ({ track: initialTrack, user
         friendlyError = "AI 服务繁忙 (503)，请稍后再试。";
       } else if (errorStr.includes("API Key") || errorStr.includes("400") || errorStr.includes("must be set") || errorStr.includes("Missing API Key")) {
          friendlyError = "API Key 配置错误。请检查 Zeabur 环境变量 VITE_API_KEY。";
+      } else if (errorStr.includes("404")) {
+         friendlyError = "模型不可用 (404)。请检查代码中使用的 Gemini 模型版本。";
       }
 
       setError(friendlyError);
