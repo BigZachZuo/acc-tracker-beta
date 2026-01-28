@@ -139,9 +139,9 @@ const SubmitLapForm: React.FC<SubmitLapFormProps> = ({ track: initialTrack, user
         ${trackListContext}
       `;
 
-      // Use gemini-3-flash-preview for reliable multimodal analysis
+      // Switch to 'gemini-2.0-flash' which is the current stable release with better rate limits than previews
       const response = await ai.models.generateContent({
-        model: 'gemini-3-flash-preview',
+        model: 'gemini-2.0-flash',
         contents: {
           parts: [
             { inlineData: { mimeType: mimeType, data: base64Data } },
@@ -201,7 +201,7 @@ const SubmitLapForm: React.FC<SubmitLapFormProps> = ({ track: initialTrack, user
       let friendlyError = "AI 识别失败";
 
       if (errorStr.includes("429") || errorStr.includes("RESOURCE_EXHAUSTED") || errorStr.includes("quota")) {
-        friendlyError = "配额耗尽 (429)。由于您使用的是免费 API Key，请求受限。请稍后再试，或改用付费 Key。";
+        friendlyError = "配额耗尽 (429)。请稍后再试。";
       } else if (errorStr.includes("503") || errorStr.includes("overloaded")) {
         friendlyError = "AI 服务繁忙 (503)，请稍后再试。";
       } else if (errorStr.includes("API Key") || errorStr.includes("400") || errorStr.includes("must be set") || errorStr.includes("Missing API Key")) {
