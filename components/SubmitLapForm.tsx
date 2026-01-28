@@ -139,7 +139,7 @@ const SubmitLapForm: React.FC<SubmitLapFormProps> = ({ track: initialTrack, user
         ${trackListContext}
       `;
 
-      // Switch to 'gemini-2.0-flash' which is the current stable release with better rate limits than previews
+      // Use 'gemini-2.0-flash' as it is stable and reliable for multimodal tasks
       const response = await ai.models.generateContent({
         model: 'gemini-2.0-flash',
         contents: {
@@ -200,7 +200,14 @@ const SubmitLapForm: React.FC<SubmitLapFormProps> = ({ track: initialTrack, user
 
       let friendlyError = "AI 识别失败";
 
-      if (errorStr.includes("429") || errorStr.includes("RESOURCE_EXHAUSTED") || errorStr.includes("quota")) {
+      // Debug helper: Show last 4 chars of key to verify update
+      const keySuffix = process.env.API_KEY && process.env.API_KEY.length > 4 
+        ? process.env.API_KEY.slice(-4) 
+        : "****";
+
+      if (errorStr.includes("Project quota tier unavailable") || errorStr.includes("403")) {
+        friendlyError = `API Key 项目异常 (当前Key尾号: ${keySuffix})。请确保 Zeabur 变量 VITE_API_KEY 已更新为新 Key 并重新部署。`;
+      } else if (errorStr.includes("429") || errorStr.includes("RESOURCE_EXHAUSTED") || errorStr.includes("quota")) {
         friendlyError = "配额耗尽 (429)。请稍后再试。";
       } else if (errorStr.includes("503") || errorStr.includes("overloaded")) {
         friendlyError = "AI 服务繁忙 (503)，请稍后再试。";
