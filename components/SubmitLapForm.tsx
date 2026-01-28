@@ -15,6 +15,49 @@ interface SubmitLapFormProps {
   initialData?: LapTime | null;
 }
 
+const compressImage = (file: File): Promise<string> => {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.readAsDataURL(file);
+    reader.onload = (event) => {
+      const img = new Image();
+      img.src = event.target?.result as string;
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        // Resize to max 1024x1024 - ample for OCR but reduces payload significantly
+        const MAX_SIZE = 1024;
+        let width = img.width;
+        let height = img.height;
+
+        if (width > height) {
+          if (width > MAX_SIZE) {
+            height *= MAX_SIZE / width;
+            width = MAX_SIZE;
+          }
+        } else {
+          if (height > MAX_SIZE) {
+            width *= MAX_SIZE / height;
+            height = MAX_SIZE;
+          }
+        }
+
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        if (ctx) {
+            ctx.drawImage(img, 0, 0, width, height);
+            // Compress to JPEG 80% quality
+            resolve(canvas.toDataURL('image/jpeg', 0.8));
+        } else {
+            reject(new Error("Canvas context failed"));
+        }
+      };
+      img.onerror = (err) => reject(err);
+    };
+    reader.onerror = (err) => reject(err);
+  });
+};
+
 const SubmitLapForm: React.FC<SubmitLapFormProps> = ({ track: initialTrack, user, onSuccess, onCancel, initialData }) => {
   // State initialization
   const [targetTrackId, setTargetTrackId] = useState(initialData?.trackId || initialTrack.id);
@@ -43,17 +86,17 @@ const SubmitLapForm: React.FC<SubmitLapFormProps> = ({ track: initialTrack, user
     const file = e.target.files?.[0];
     if (!file) return;
 
-    // 1. Preview
-    const reader = new FileReader();
-    reader.onloadend = () => {
-      const base64String = reader.result as string;
-      setPreviewImage(base64String);
-      // Removed automatic call to analyzeScreenshot to save quota
-      setIsVerified(false);
-      setError('');
-      setRawError('');
-    };
-    reader.readAsDataURL(file);
+    try {
+        // Compress image before setting preview to save memory and later bandwidth
+        const compressedBase64 = await compressImage(file);
+        setPreviewImage(compressedBase64);
+        setIsVerified(false);
+        setError('');
+        setRawError('');
+    } catch (err) {
+        console.error("Image processing error:", err);
+        setError("图片处理失败，请重试");
+    }
   };
 
   const analyzeScreenshot = async (base64Full: string) => {
@@ -66,8 +109,9 @@ const SubmitLapForm: React.FC<SubmitLapFormProps> = ({ track: initialTrack, user
         throw new Error("Missing API Key. Please set VITE_API_KEY in Zeabur variables.");
       }
 
-      // Clean base64 string (remove data:image/png;base64, prefix)
+      // Clean base64 string (remove data:image/jpeg;base64, prefix)
       const base64Data = base64Full.split(',')[1];
+      // Extract mime type dynamically, though we compressed to jpeg
       const mimeType = base64Full.split(';')[0].split(':')[1];
 
       const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
@@ -95,8 +139,9 @@ const SubmitLapForm: React.FC<SubmitLapFormProps> = ({ track: initialTrack, user
         ${trackListContext}
       `;
 
+      // Use gemini-2.0-flash-exp for better quota handling on free tier than gemini-3-preview
       const response = await ai.models.generateContent({
-        model: 'gemini-3-flash-preview',
+        model: 'gemini-2.0-flash-exp',
         contents: {
           parts: [
             { inlineData: { mimeType: mimeType, data: base64Data } },
@@ -156,7 +201,7 @@ const SubmitLapForm: React.FC<SubmitLapFormProps> = ({ track: initialTrack, user
       let friendlyError = "AI 识别失败";
 
       if (errorStr.includes("429") || errorStr.includes("RESOURCE_EXHAUSTED") || errorStr.includes("quota")) {
-        friendlyError = "配额耗尽 (429)。请检查 API Key 配额或稍后再试。";
+        friendlyError = "配额耗尽 (429)。由于您使用的是免费 API Key，请求受限。请稍后再试，或改用付费 Key。";
       } else if (errorStr.includes("503") || errorStr.includes("overloaded")) {
         friendlyError = "AI 服务繁忙 (503)，请稍后再试。";
       } else if (errorStr.includes("API Key") || errorStr.includes("400") || errorStr.includes("must be set") || errorStr.includes("Missing API Key")) {
