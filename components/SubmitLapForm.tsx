@@ -139,9 +139,9 @@ const SubmitLapForm: React.FC<SubmitLapFormProps> = ({ track: initialTrack, user
         ${trackListContext}
       `;
 
-      // Use 'gemini-2.0-flash' as it is stable and reliable for multimodal tasks
+      // Use 'gemini-3-flash-preview' as it is the latest model recommended for text/multimodal tasks
       const response = await ai.models.generateContent({
-        model: 'gemini-2.0-flash',
+        model: 'gemini-3-flash-preview',
         contents: {
           parts: [
             { inlineData: { mimeType: mimeType, data: base64Data } },
@@ -205,8 +205,10 @@ const SubmitLapForm: React.FC<SubmitLapFormProps> = ({ track: initialTrack, user
         ? process.env.API_KEY.slice(-4) 
         : "****";
 
-      if (errorStr.includes("Project quota tier unavailable") || errorStr.includes("403")) {
-        friendlyError = `API Key 项目异常 (当前Key尾号: ${keySuffix})。请确保 Zeabur 变量 VITE_API_KEY 已更新为新 Key 并重新部署。`;
+      if (errorStr.includes("Project quota tier unavailable")) {
+        friendlyError = `项目配额受限 (Key尾号: ${keySuffix})。该 Key 关联的 Google Cloud 项目未绑定结算账户。如果您刚刚绑定了信用卡，可能需要等待几分钟生效。`;
+      } else if (errorStr.includes("403")) {
+        friendlyError = `API 权限不足 (Key尾号: ${keySuffix})。请检查 Key 是否有效，或尝试重新创建。`;
       } else if (errorStr.includes("429") || errorStr.includes("RESOURCE_EXHAUSTED") || errorStr.includes("quota")) {
         friendlyError = "配额耗尽 (429)。请稍后再试。";
       } else if (errorStr.includes("503") || errorStr.includes("overloaded")) {
@@ -306,6 +308,17 @@ const SubmitLapForm: React.FC<SubmitLapFormProps> = ({ track: initialTrack, user
 
   const currentTrack = TRACKS.find(t => t.id === targetTrackId) || initialTrack;
 
+  const BillingLink = () => (
+    <a 
+      href="https://console.cloud.google.com/billing" 
+      target="_blank" 
+      rel="noopener noreferrer"
+      className="block w-full bg-yellow-700 hover:bg-yellow-600 text-white text-center text-xs py-2 rounded transition-colors mt-2"
+    >
+      👉 点击此处前往 Google Cloud Console 绑定结算账户
+    </a>
+  );
+
   return (
     <div className="bg-slate-800 p-6 rounded-xl border border-slate-700 shadow-2xl max-w-lg mx-auto w-full animate-fade-in-up">
       <div className="flex items-center justify-between mb-6">
@@ -389,14 +402,16 @@ const SubmitLapForm: React.FC<SubmitLapFormProps> = ({ track: initialTrack, user
             {!isAnalyzing && error && (
                <div className="absolute inset-0 flex flex-col items-center justify-center bg-slate-900/90 backdrop-blur-sm rounded-lg z-10 p-4 text-center">
                   <div className="text-red-400 text-sm font-bold mb-1">{error}</div>
+                  {(error.includes("项目配额") || error.includes("Project quota")) && <BillingLink />}
+                  
                   {/* Detailed Error for Debugging */}
                   {rawError && (
-                     <div className="text-[10px] text-slate-400 mb-3 max-w-xs break-all bg-black/30 p-1 rounded font-mono">
+                     <div className="text-[10px] text-slate-400 mb-3 mt-2 max-w-xs break-all bg-black/30 p-1 rounded font-mono">
                         {rawError.slice(0, 150)}{rawError.length > 150 ? '...' : ''}
                      </div>
                   )}
 
-                  <div className="flex gap-2">
+                  <div className="flex gap-2 mt-2">
                     <Button 
                       type="button" 
                       variant="primary" 
@@ -609,7 +624,8 @@ const SubmitLapForm: React.FC<SubmitLapFormProps> = ({ track: initialTrack, user
 
         {error && !previewImage && (
           <div className="bg-yellow-900/50 border border-yellow-500/50 text-yellow-200 px-4 py-3 rounded text-sm font-semibold break-words">
-            ⚠️ {error}
+            <div>⚠️ {error}</div>
+            {(error.includes("项目配额") || error.includes("Project quota")) && <BillingLink />}
           </div>
         )}
 
