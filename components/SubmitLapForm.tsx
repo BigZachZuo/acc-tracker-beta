@@ -139,33 +139,54 @@ const SubmitLapForm: React.FC<SubmitLapFormProps> = ({ track: initialTrack, user
         ${trackListContext}
       `;
 
-      // Use 'gemini-3-flash-preview' as it is the latest model recommended for text/multimodal tasks
-      const response = await ai.models.generateContent({
-        model: 'gemini-3-flash-preview',
-        contents: {
-          parts: [
-            { inlineData: { mimeType: mimeType, data: base64Data } },
-            { text: prompt }
-          ]
-        },
-        config: {
-          responseMimeType: "application/json",
-          responseSchema: {
-            type: Type.OBJECT,
-            properties: {
-              minutes: { type: Type.INTEGER },
-              seconds: { type: Type.INTEGER },
-              milliseconds: { type: Type.INTEGER },
-              carId: { type: Type.STRING, description: "ID from Car List" },
-              trackId: { type: Type.STRING, description: "ID from Track List" },
-              trackTemp: { type: Type.INTEGER },
-            },
-            required: ["minutes", "seconds", "milliseconds"]
-          }
-        }
-      });
+      let response;
+      let attempt = 0;
+      const maxAttempts = 3;
 
-      const resultText = response.text;
+      while (attempt < maxAttempts) {
+        try {
+          // Use 'gemini-2.0-flash' which is currently more stable for production than the 3.0 preview
+          response = await ai.models.generateContent({
+            model: 'gemini-2.0-flash',
+            contents: {
+              parts: [
+                { inlineData: { mimeType: mimeType, data: base64Data } },
+                { text: prompt }
+              ]
+            },
+            config: {
+              responseMimeType: "application/json",
+              responseSchema: {
+                type: Type.OBJECT,
+                properties: {
+                  minutes: { type: Type.INTEGER },
+                  seconds: { type: Type.INTEGER },
+                  milliseconds: { type: Type.INTEGER },
+                  carId: { type: Type.STRING, description: "ID from Car List" },
+                  trackId: { type: Type.STRING, description: "ID from Track List" },
+                  trackTemp: { type: Type.INTEGER },
+                },
+                required: ["minutes", "seconds", "milliseconds"]
+              }
+            }
+          });
+          break; // Success, exit loop
+        } catch (err: any) {
+          const isOverloaded = err.message?.includes('503') || err.message?.includes('overloaded') || err.status === 503;
+          
+          if (isOverloaded && attempt < maxAttempts - 1) {
+            attempt++;
+            console.warn(`Gemini 503 Error. Retrying (Attempt ${attempt}/${maxAttempts})...`);
+            // Exponential backoff: 1s, 2s, 4s...
+            await new Promise(resolve => setTimeout(resolve, 1000 * Math.pow(2, attempt)));
+            continue;
+          }
+          
+          throw err; // Rethrow if not 503 or max attempts reached
+        }
+      }
+
+      const resultText = response?.text;
       if (resultText) {
         let cleanText = resultText.trim();
         // Robust cleaning of markdown code blocks
@@ -212,7 +233,7 @@ const SubmitLapForm: React.FC<SubmitLapFormProps> = ({ track: initialTrack, user
       } else if (errorStr.includes("429") || errorStr.includes("RESOURCE_EXHAUSTED") || errorStr.includes("quota")) {
         friendlyError = "配额耗尽 (429)。请稍后再试。";
       } else if (errorStr.includes("503") || errorStr.includes("overloaded")) {
-        friendlyError = "AI 服务繁忙 (503)，请稍后再试。";
+        friendlyError = "AI 服务繁忙 (503)，正在重试但仍未恢复，请稍后再试。";
       } else if (errorStr.includes("API Key") || errorStr.includes("400") || errorStr.includes("must be set") || errorStr.includes("Missing API Key")) {
          friendlyError = "API Key 配置错误。请检查 Zeabur 环境变量 VITE_API_KEY。";
       } else if (errorStr.includes("404")) {
@@ -382,6 +403,7 @@ const SubmitLapForm: React.FC<SubmitLapFormProps> = ({ track: initialTrack, user
               <div className="absolute inset-0 flex flex-col items-center justify-center bg-slate-900/80 backdrop-blur-sm rounded-lg z-10">
                  <span className="w-8 h-8 border-4 border-red-500 border-t-transparent rounded-full animate-spin mb-2"></span>
                  <span className="text-white font-bold text-sm shadow-black drop-shadow-md">正在识别赛道与圈速...</span>
+                 <span className="text-xs text-slate-300 mt-1">如遇到繁忙，系统将自动重试</span>
               </div>
             )}
             
