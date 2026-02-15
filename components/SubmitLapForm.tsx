@@ -247,12 +247,6 @@ const SubmitLapForm: React.FC<SubmitLapFormProps> = ({ track: initialTrack, user
     }
   };
 
-  const handleManualTimeChange = (setter: React.Dispatch<React.SetStateAction<string>>, value: string) => {
-    setter(value);
-    // If user manually changes the time, invalidate the AI verification
-    setIsVerified(false);
-  };
-
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
@@ -260,25 +254,28 @@ const SubmitLapForm: React.FC<SubmitLapFormProps> = ({ track: initialTrack, user
     setSuccessMessage('');
     setIsSubmitting(true);
 
+    if (!isVerified) {
+        setError('必须通过上传游戏截图并成功识别后才能提交。');
+        setIsSubmitting(false);
+        return;
+    }
+
     const m = parseInt(minutes);
     const s = parseInt(seconds);
     const ms = parseInt(millis);
     const tTemp = trackTemp ? parseInt(trackTemp) : undefined;
 
     if (isNaN(m) || isNaN(s) || isNaN(ms)) {
-      setError('请输入有效的圈速。');
+      setError('数据无效，请重新识别。');
       setIsSubmitting(false);
       return;
     }
-    if (s >= 60) {
-      setError('秒数必须小于60。');
-      setIsSubmitting(false);
-      return;
-    }
-    if (ms >= 1000) {
-      setError('毫秒数必须小于1000。');
-      setIsSubmitting(false);
-      return;
+    
+    // Strict Verification check
+    if (s >= 60 || ms >= 1000) {
+       setError('时间格式无效，请检查识别结果。');
+       setIsSubmitting(false);
+       return;
     }
 
     const totalMilliseconds = (m * 60 * 1000) + (s * 1000) + ms;
@@ -304,15 +301,13 @@ const SubmitLapForm: React.FC<SubmitLapFormProps> = ({ track: initialTrack, user
       conditions,
       trackTemp: tTemp,
       inputDevice,
-      isVerified: isVerified
+      isVerified: true // Must be true to reach here
     };
 
     let result;
     if (isEditing) {
-       // If editing, force update regardless of PB check (assumes correction)
        result = await updateLapTime(lapData);
     } else {
-       // If new, use standard submission (checks PB)
        result = await submitLapTime(lapData);
     }
     
@@ -356,7 +351,7 @@ const SubmitLapForm: React.FC<SubmitLapFormProps> = ({ track: initialTrack, user
              </div>
           )}
           <div className="text-xs bg-slate-900 px-3 py-1 rounded-full border border-slate-700 text-slate-400">
-             {isEditing ? '编辑模式' : 'AI 辅助模式'}
+             严格模式
           </div>
         </div>
       </div>
@@ -387,7 +382,7 @@ const SubmitLapForm: React.FC<SubmitLapFormProps> = ({ track: initialTrack, user
               {isEditing ? '上传新截图以更新数据' : '点击上传游戏截图'}
             </span>
             <span className="text-xs text-slate-500">
-               {isEditing ? '这将覆盖当前数据' : '上传截图后手动点击识别'}
+               请上传包含圈速、车辆和赛道信息的完整截图
             </span>
           </button>
         ) : (
@@ -474,7 +469,7 @@ const SubmitLapForm: React.FC<SubmitLapFormProps> = ({ track: initialTrack, user
                       setSeconds('');
                       setMillis('');
                       setTrackTemp('');
-                      setTargetTrackId(initialTrack.id);
+                      // Don't reset targetTrackId completely, let it stay visual
                   }
                   setIsVerified(false);
                 }}
@@ -492,10 +487,11 @@ const SubmitLapForm: React.FC<SubmitLapFormProps> = ({ track: initialTrack, user
 
       <form onSubmit={handleSubmit} className="space-y-6">
         
-        {/* Track Display */}
+        {/* Track Display - Read Only */}
         <div>
            <div className="flex items-center gap-2 mb-2">
-             <label className="block text-slate-400 text-sm font-bold">赛道</label>
+             <label className="block text-slate-400 text-sm font-bold">赛道 (AI 自动识别)</label>
+             <span className="text-xs text-slate-500">🔒</span>
            </div>
            <div className={`flex items-center gap-3 p-3 bg-slate-950 border border-slate-800 rounded-lg ${isAnalyzing ? 'opacity-50' : ''}`}>
               {currentTrack.imageUrl && (
@@ -508,13 +504,16 @@ const SubmitLapForm: React.FC<SubmitLapFormProps> = ({ track: initialTrack, user
            </div>
         </div>
 
-        {/* Car Selection */}
+        {/* Car Selection - Read Only/Disabled */}
         <div>
-          <label className="block text-slate-400 text-sm font-bold mb-2">车辆</label>
+          <div className="flex items-center gap-2 mb-2">
+             <label className="block text-slate-400 text-sm font-bold">车辆 (AI 自动识别)</label>
+             <span className="text-xs text-slate-500">🔒</span>
+          </div>
           <select 
             value={carId} 
-            onChange={(e) => setCarId(e.target.value)}
-            className="w-full bg-slate-900 border border-slate-700 rounded-lg px-4 py-3 text-white focus:border-red-500 focus:outline-none focus:ring-1 focus:ring-red-500"
+            disabled={true}
+            className="w-full bg-slate-900 border border-slate-700 rounded-lg px-4 py-3 text-white opacity-70 cursor-not-allowed appearance-none"
           >
             {CARS.map(car => (
               <option key={car.id} value={car.id}>
@@ -524,60 +523,53 @@ const SubmitLapForm: React.FC<SubmitLapFormProps> = ({ track: initialTrack, user
           </select>
         </div>
 
-        {/* Lap Time Inputs */}
+        {/* Lap Time Inputs - Read Only */}
         <div>
           <div className="flex items-center gap-2 mb-2">
-             <label className="block text-slate-400 text-sm font-bold">圈速成绩</label>
+             <label className="block text-slate-400 text-sm font-bold">圈速成绩 (AI 自动识别)</label>
+             <span className="text-xs text-slate-500">🔒</span>
              {isVerified && (
-               <span className="text-[10px] text-green-500 bg-green-900/20 px-1.5 rounded border border-green-800/50">已锁定验证</span>
+               <span className="text-[10px] text-green-500 bg-green-900/20 px-1.5 rounded border border-green-800/50">已锁定</span>
              )}
           </div>
           <div className="flex items-end gap-2">
             <div className="flex-1">
               <Input 
-                placeholder="00" 
+                placeholder="--" 
                 value={minutes}
-                onChange={(e) => handleManualTimeChange(setMinutes, e.target.value)}
-                className={`text-center font-mono ${isAnalyzing ? 'opacity-50' : ''}`}
+                readOnly
+                className={`text-center font-mono cursor-not-allowed bg-slate-950 text-slate-300 border-slate-800 focus:border-slate-800 focus:ring-0 ${isAnalyzing ? 'opacity-50' : ''}`}
                 type="number"
-                min="0"
-                max="59"
               />
               <span className="text-xs text-slate-500 text-center block mt-1">分</span>
             </div>
             <span className="text-2xl text-slate-500 pb-8">:</span>
             <div className="flex-1">
               <Input 
-                placeholder="00" 
+                placeholder="--" 
                 value={seconds}
-                onChange={(e) => handleManualTimeChange(setSeconds, e.target.value)}
-                className={`text-center font-mono ${isAnalyzing ? 'opacity-50' : ''}`}
+                readOnly
+                className={`text-center font-mono cursor-not-allowed bg-slate-950 text-slate-300 border-slate-800 focus:border-slate-800 focus:ring-0 ${isAnalyzing ? 'opacity-50' : ''}`}
                 type="number"
-                min="0"
-                max="59"
               />
               <span className="text-xs text-slate-500 text-center block mt-1">秒</span>
             </div>
             <span className="text-2xl text-slate-500 pb-8">.</span>
             <div className="flex-1">
               <Input 
-                placeholder="000" 
+                placeholder="---" 
                 value={millis}
-                onChange={(e) => handleManualTimeChange(setMillis, e.target.value)}
-                className={`text-center font-mono ${isAnalyzing ? 'opacity-50' : ''}`}
+                readOnly
+                className={`text-center font-mono cursor-not-allowed bg-slate-950 text-slate-300 border-slate-800 focus:border-slate-800 focus:ring-0 ${isAnalyzing ? 'opacity-50' : ''}`}
                 type="number"
-                min="0"
-                max="999"
               />
               <span className="text-xs text-slate-500 text-center block mt-1">毫秒</span>
             </div>
           </div>
-          <div className="text-xs text-slate-500 mt-2 text-right">
-             * 手动修改时间将取消验证状态
-          </div>
         </div>
 
-        <div className="grid grid-cols-2 gap-4">
+        {/* Manual Inputs Section */}
+        <div className="grid grid-cols-2 gap-4 pt-4 border-t border-slate-800">
            <div>
               <label className="block text-slate-400 text-sm font-bold mb-2">赛道温度 (°C)</label>
               <div className="relative">
@@ -661,7 +653,12 @@ const SubmitLapForm: React.FC<SubmitLapFormProps> = ({ track: initialTrack, user
           <Button type="button" variant="ghost" onClick={onCancel} className="flex-1" disabled={isSubmitting || isAnalyzing}>
             {isEditing ? '取消编辑' : '返回'}
           </Button>
-          <Button type="submit" className="flex-1" disabled={!!successMessage || isSubmitting || isAnalyzing} isLoading={isSubmitting}>
+          <Button 
+            type="submit" 
+            className="flex-1 disabled:opacity-50 disabled:cursor-not-allowed" 
+            disabled={!isVerified || !!successMessage || isSubmitting || isAnalyzing} 
+            isLoading={isSubmitting}
+          >
             {isEditing ? '更新成绩' : '提交成绩'}
           </Button>
         </div>
