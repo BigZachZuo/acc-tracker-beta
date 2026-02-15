@@ -1,4 +1,3 @@
-
 import { Track, Car } from './types';
 
 export const TRACKS: Track[] = [
@@ -65,6 +64,14 @@ export const TRACKS: Track[] = [
     country: 'Germany', 
     length: '5.148 km',
     imageUrl: '/assets/tracks/nurburgring.svg'
+  },
+  // 24h Nurburgring Pack (Moved here as requested)
+  {
+    id: 'nurburgring_24h',
+    name: 'Nürburgring 24h',
+    country: 'Germany',
+    length: '25.378 km',
+    imageUrl: '/assets/tracks/nurburgring_24h.svg'
   },
   {
     id: 'hungaroring',
@@ -176,14 +183,6 @@ export const TRACKS: Track[] = [
     country: 'Austria',
     length: '4.318 km',
     imageUrl: '/assets/tracks/red_bull_ring.svg'
-  },
-  // 24h Nurburgring Pack
-  {
-    id: 'nurburgring_24h',
-    name: 'Nürburgring 24h',
-    country: 'Germany',
-    length: '25.378 km',
-    imageUrl: '/assets/tracks/nurburgring_24h.svg'
   }
 ];
 
