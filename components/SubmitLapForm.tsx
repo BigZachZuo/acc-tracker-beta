@@ -24,8 +24,8 @@ const compressImage = (file: File): Promise<string> => {
       img.src = event.target?.result as string;
       img.onload = () => {
         const canvas = document.createElement('canvas');
-        // Resize to max 1024x1024 - ample for OCR but reduces payload significantly
-        const MAX_SIZE = 1024;
+        // Resize to max 1920x1920 - better for OCR while keeping payload reasonable
+        const MAX_SIZE = 1920;
         let width = img.width;
         let height = img.height;
 
@@ -105,8 +105,10 @@ const SubmitLapForm: React.FC<SubmitLapFormProps> = ({ track: initialTrack, user
     setRawError('');
 
     try {
-      if (!process.env.API_KEY) {
-        throw new Error("Missing API Key. Please set VITE_API_KEY in Zeabur variables.");
+      const apiKey = process.env.GEMINI_API_KEY || process.env.API_KEY;
+      if (!apiKey) {
+        console.error("API Key is missing in environment variables");
+        throw new Error("Missing API Key. Please check environment variables (VITE_API_KEY, API_KEY, or GEMINI_API_KEY).");
       }
 
       // Clean base64 string (remove data:image/jpeg;base64, prefix)
@@ -114,9 +116,12 @@ const SubmitLapForm: React.FC<SubmitLapFormProps> = ({ track: initialTrack, user
       // Extract mime type dynamically, though we compressed to jpeg
       const mimeType = base64Full.split(';')[0].split(':')[1];
 
-      const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+      const ai = new GoogleGenAI({ apiKey });
       
       // Prepare Contexts
+      const carIds = CARS.map(c => c.id);
+      const trackIds = TRACKS.map(t => t.id);
+      
       const carListContext = CARS.map(c => `ID: "${c.id}", Name: "${c.brand} ${c.name}"`).join('\n');
       const trackListContext = TRACKS.map(t => `ID: "${t.id}", Name: "${t.name}"`).join('\n');
 
@@ -124,10 +129,22 @@ const SubmitLapForm: React.FC<SubmitLapFormProps> = ({ track: initialTrack, user
         Analyze this Assetto Corsa Competizione screenshot.
         
         Tasks:
-        1. **Fastest Lap**: Identify the FASTEST (lowest) valid lap time (MM:SS.ms) visible in the image. 
-           - If a leaderboard is shown, select the row with the best time.
-           - Ignore invalid laps (often red) if a valid one exists.
+        1. **Fastest Lap**: Identify the FASTEST (lowest) valid lap time.
+           - CRITICAL: Do NOT just pick the first time you see. You MUST scan the entire list.
+           - Look for columns labeled "Best", "Fastest", or "Lap".
+           - List ALL valid times found in the \`allLapTimesFound\` field.
+           - Compare ALL valid times found in the image.
+           - Select the SMALLEST numerical value (e.g. 2:14.000 is faster than 2:15.000).
+           - Ignore invalid laps (red text, or marked with 'Invalid', 'C', '*').
+           - STRICT FORMAT: "Minutes:Seconds.Milliseconds" (e.g., 2:24.123).
+           - The number BEFORE the colon (:) is MINUTES.
+           - The number AFTER the colon (:) is SECONDS.
+           - The number AFTER the dot (.) is MILLISECONDS (must be 3 digits).
+           - WARNING: Do NOT swap Minutes and Seconds. 
+             - Correct: "2:27.495" -> Minutes=2, Seconds=27, Milliseconds=495.
+           - Pay close attention to the milliseconds part (the 3 digits after the dot).
         2. **Car**: Identify the Car Model specifically used for that fastest lap. Match it to the provided Car List.
+           - Ensure the car matches the row where the fastest lap was found.
         3. **Track**: Identify the Track Name from the UI/Environment and match to the provided Track List.
         4. **Conditions**: Identify Track Temperature (e.g., "Track: 24°C").
 
@@ -145,7 +162,7 @@ const SubmitLapForm: React.FC<SubmitLapFormProps> = ({ track: initialTrack, user
 
       while (attempt < maxAttempts) {
         try {
-          // Use 'gemini-2.0-flash' which is currently more stable for production than the 3.0 preview
+          // Use 'gemini-2.0-flash' as it is stable and reliable for multimodal tasks
           response = await ai.models.generateContent({
             model: 'gemini-2.0-flash',
             contents: {
@@ -155,51 +172,69 @@ const SubmitLapForm: React.FC<SubmitLapFormProps> = ({ track: initialTrack, user
               ]
             },
             config: {
+              maxOutputTokens: 1024,
               responseMimeType: "application/json",
               responseSchema: {
                 type: Type.OBJECT,
                 properties: {
+                  isValid: { type: Type.BOOLEAN, description: "True if image contains valid ACC lap time data" },
+                  allLapTimesFound: { type: Type.ARRAY, items: { type: Type.STRING }, description: "List of all valid lap times found in the image (e.g. ['2:15.123', '2:14.567'])" },
+                  rawLapTime: { type: Type.STRING, description: "The exact string of the fastest lap time found (e.g. '2:14.567')" },
                   minutes: { type: Type.INTEGER },
                   seconds: { type: Type.INTEGER },
-                  milliseconds: { type: Type.INTEGER },
-                  carId: { type: Type.STRING, description: "ID from Car List" },
-                  trackId: { type: Type.STRING, description: "ID from Track List" },
+                  milliseconds: { type: Type.INTEGER, description: "The milliseconds part (0-999). E.g. 567 for .567s" },
+                  carId: { type: Type.STRING, enum: carIds, description: "ID from Car List" },
+                  trackId: { type: Type.STRING, enum: trackIds, description: "ID from Track List" },
                   trackTemp: { type: Type.INTEGER },
                 },
-                required: ["minutes", "seconds", "milliseconds"]
+                required: ["isValid"]
               }
             }
           });
           break; // Success, exit loop
         } catch (err: any) {
-          const isOverloaded = err.message?.includes('503') || err.message?.includes('overloaded') || err.status === 503;
+          const isOverloaded = err.message?.includes('503') || err.message?.includes('overloaded') || err.status === 503 || err.message?.includes('429');
           
           if (isOverloaded && attempt < maxAttempts - 1) {
             attempt++;
-            console.warn(`Gemini 503 Error. Retrying (Attempt ${attempt}/${maxAttempts})...`);
+            console.warn(`Gemini API Error. Retrying (Attempt ${attempt}/${maxAttempts})...`);
             // Exponential backoff: 1s, 2s, 4s...
             await new Promise(resolve => setTimeout(resolve, 1000 * Math.pow(2, attempt)));
             continue;
           }
           
-          throw err; // Rethrow if not 503 or max attempts reached
+          throw err; // Rethrow if not retryable or max attempts reached
         }
       }
 
       const resultText = response?.text;
       if (resultText) {
         let cleanText = resultText.trim();
-        // Robust cleaning of markdown code blocks
         if (cleanText.startsWith('```')) {
             cleanText = cleanText.replace(/^```json\s?/, '').replace(/^```\s?/, '').replace(/```$/, '');
         }
 
-        const data = JSON.parse(cleanText);
+        let data;
+        try {
+            data = JSON.parse(cleanText);
+        } catch (parseErr) {
+            console.error("JSON Parse Error:", parseErr);
+            console.error("Raw Text:", cleanText.slice(0, 500));
+            throw new Error("AI returned invalid JSON. Please try again.");
+        }
         
+        // CHECK VALIDITY
+        if (!data.isValid) {
+            setError("识别失败：请上传包含 赛道、车辆 和 圈速数据 的 ACC 游戏截图 (如统计数据页、结算页或排行榜)。");
+            setIsVerified(false);
+            return;
+        }
+
         if (data.minutes !== undefined) setMinutes(data.minutes.toString());
         if (data.seconds !== undefined) setSeconds(data.seconds.toString());
         if (data.milliseconds !== undefined) setMillis(data.milliseconds.toString());
-        if (data.trackTemp !== undefined) setTrackTemp(data.trackTemp.toString());
+        
+        // Track temp is manual now, do not set from AI
         
         if (data.carId && CARS.some(c => c.id === data.carId)) {
           setCarId(data.carId);
@@ -235,7 +270,7 @@ const SubmitLapForm: React.FC<SubmitLapFormProps> = ({ track: initialTrack, user
       } else if (errorStr.includes("503") || errorStr.includes("overloaded")) {
         friendlyError = "AI 服务繁忙 (503)，正在重试但仍未恢复，请稍后再试。";
       } else if (errorStr.includes("API Key") || errorStr.includes("400") || errorStr.includes("must be set") || errorStr.includes("Missing API Key")) {
-         friendlyError = "API Key 配置错误。请检查 Zeabur 环境变量 VITE_API_KEY。";
+         friendlyError = "API Key 配置错误。请检查环境变量配置 (VITE_API_KEY 或 API_KEY)。";
       } else if (errorStr.includes("404")) {
          friendlyError = "模型不可用 (404)。请检查代码中使用的 Gemini 模型版本。";
       }
@@ -382,7 +417,7 @@ const SubmitLapForm: React.FC<SubmitLapFormProps> = ({ track: initialTrack, user
               {isEditing ? '上传新截图以更新数据' : '点击上传游戏截图'}
             </span>
             <span className="text-xs text-slate-500">
-               请上传包含圈速、车辆和赛道信息的完整截图
+               请上传"车手资料 / 统计数据"页面的完整截图
             </span>
           </button>
         ) : (

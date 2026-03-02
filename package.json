@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
+    "lint": "tsc --noEmit",
     "start": "serve -s dist -l 8080",
     "preview": "vite preview"
   },
